@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="环拍助手">
+<title>环拍助手</title>
+<style>
+  :root { --bg:#111; --fg:#eee; --mut:#999; --ok:#3ecf6e; --warn:#ffcc33; --bad:#ff5a4f; --acc:#4da3ff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:15px/1.45 -apple-system, "PingFang SC", "Hiragino Sans", sans-serif; }
+  .hidden { display:none !important; }
+  button { font:inherit; border:0; border-radius:10px; padding:10px 14px; background:#2a2a2a; color:var(--fg); }
+  button.pri { background:var(--acc); color:#fff; font-weight:600; }
+  button.rec { background:var(--bad); color:#fff; font-weight:700; }
+  button:disabled { opacity:.4; }
+  /* setup */
+  #setup, #save { padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 20px); overflow-y:auto; height:100%; }
+  h1 { font-size:20px; margin:4px 0 10px; }
+  h2 { font-size:16px; margin:16px 0 6px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:6px; }
+  .ob { padding:8px 4px; text-align:center; border-radius:8px; background:#222; font-weight:600; position:relative; }
+  .ob.sel { outline:2px solid var(--acc); }
+  .ob small { display:block; font-weight:400; font-size:11px; color:var(--mut); }
+  .ob .st { font-size:11px; font-weight:400; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .mut { color:var(--mut); }
+  .card { background:#1b1b1b; border-radius:12px; padding:10px; margin-top:10px; }
+  .pose { display:flex; gap:10px; align-items:flex-start; margin-top:8px; }
+  .pose img { width:52%; max-width:300px; border-radius:8px; background:#ddd; }
+  .pose.cur { outline:2px solid var(--acc); border-radius:10px; padding:4px; }
+  .seg { display:flex; gap:6px; margin-top:8px; }
+  .seg button { flex:1; }
+  .seg button.on { background:var(--acc); color:#fff; }
+  details { margin-top:12px; background:#1b1b1b; border-radius:12px; padding:8px 12px; }
+  details li { margin:4px 0; }
+  #env { font-size:12px; color:var(--mut); margin-top:10px; white-space:pre-wrap; }
+  /* capture */
+  #cap { position:fixed; inset:0; background:#000; }
+  #v { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
+  #box { position:absolute; border:2px dashed rgba(255,255,255,.75); border-radius:6px; pointer-events:none; }
+  #hud { position:absolute; left:0; right:0; top:0; padding:calc(env(safe-area-inset-top) + 4px) 10px 4px;
+    background:linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0)); font-size:13px; display:flex; gap:10px; flex-wrap:wrap; }
+  #hud .recdot { color:var(--bad); font-weight:700; }
+  #panel { position:absolute; background:rgba(0,0,0,.62); border-radius:14px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+  @media (orientation:landscape) {
+    #panel { right:calc(env(safe-area-inset-right) + 6px); top:36px; bottom:8px; width:250px; }
+  }
+  @media (orientation:portrait) {
+    #panel { left:6px; right:6px; bottom:calc(env(safe-area-inset-bottom) + 6px); }
+    #panel .row2 { display:flex; gap:8px; align-items:center; }
+    #panel #map { width:170px; height:133px; }
+  }
+  #map { width:230px; height:180px; align-self:center; }
+  #guide { font-size:16px; font-weight:600; min-height:2.6em; }
+  #speed { font-size:13px; }
+  #lockinfo { font-size:11px; color:var(--mut); }
+  #warnbar { position:absolute; left:50%; transform:translateX(-50%); top:44px; padding:6px 12px; border-radius:10px;
+    background:rgba(255,90,79,.9); color:#fff; font-weight:700; }
+  .btns { display:flex; gap:6px; flex-wrap:wrap; }
+  .btns button { flex:1; padding:9px 6px; }
+  /* save */
+  table { border-collapse:collapse; width:100%; margin-top:6px; }
+  td,th { border-bottom:1px solid #333; padding:4px 6px; text-align:left; font-size:14px; }
+</style>
+</head>
+<body>
+
+<!-- ========== 1. 选择物体 ========== -->
+<div id="setup">
+  <h1>环拍助手 <span class="mut" style="font-size:13px">打印件实拍</span></h1>
+  <div class="grid" id="objgrid"></div>
+  <div class="card" id="objcard"></div>
+  <details>
+    <summary>拍摄前检查（每次开拍前看一眼）</summary>
+    <ol>
+      <li>物体放在<b>有纹理、不是纯白</b>的垫子/桌布中间，周围 30 cm 内不要有别的东西挪动。</li>
+      <li>光线均匀柔和：不要直射阳光，背景里不要有窗户或很亮的灯。</li>
+      <li>手机<b>全程同一个握持方向</b>（建议横屏），不要中途转屏。</li>
+      <li>离物体约 30–40 cm，物体始终在虚线框内、四周留空，不要拍到出画。</li>
+      <li>先绕低圈（约 15°）、再中圈（约 40°）、再高圈（约 65°），最后从正上方拍几秒；每圈走慢一点，30 秒以上。</li>
+      <li>第 1 遍拍完后，按“第 2 遍 B”的图重新放好，同样的路线再拍一次。</li>
+      <li>拍的过程中不要碰物体和垫子。</li>
+    </ol>
+  </details>
+  <div style="margin-top:14px; display:flex; gap:8px">
+    <button class="pri" id="btnStart" style="flex:1; padding:14px">打开相机开始拍</button>
+  </div>
+  <div id="env"></div>
+</div>
+
+<!-- ========== 2. 拍摄 ========== -->
+<div id="cap" class="hidden">
+  <video id="v" playsinline muted autoplay></video>
+  <div id="box"></div>
+  <div id="hud">
+    <span id="hudObj"></span><span id="hudRec"></span><span id="hudSize"></span><span id="hudRes" class="mut"></span>
+  </div>
+  <div id="warnbar" class="hidden"></div>
+  <div id="panel">
+    <div class="row2">
+      <canvas id="map" width="460" height="360"></canvas>
+      <div style="flex:1">
+        <div id="guide">准备好后点“开始录制”</div>
+        <div id="speed"></div>
+      </div>
+    </div>
+    <div class="btns">
+      <button id="btnLock">锁定曝光/对焦</button>
+      <button id="btnRec" class="rec">● 开始录制</button>
+    </div>
+    <div class="btns">
+      <button id="btnBack">返回</button>
+      <select id="camSel" style="flex:2; background:#2a2a2a; color:#eee; border:0; border-radius:10px; padding:8px; font-size:13px"></select>
+    </div>
+    <div id="lockinfo"></div>
+  </div>
+</div>
+
+<!-- ========== 3. 保存 ========== -->
+<div id="save" class="hidden">
+  <h1>保存这一遍</h1>
+  <div id="sumTxt"></div>
+  <table id="sumTab"></table>
+  <p class="warn" id="sumWarn"></p>
+  <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px">
+    <button class="pri" id="btnShareBoth" style="padding:14px">保存视频 + 姿态文件（在分享菜单里选“存储到文件”）</button>
+    <button id="btnShareVid">只保存视频（可存到相册 / 隔空投送）</button>
+    <button id="btnNext">下一步</button>
+    <button id="btnRetake">不保存，重拍这一遍</button>
+  </div>
+  <p class="mut" style="font-size:12px">视频和姿态文件只存在这个页面里，点“下一步”或“重拍”后会被清掉，请先保存。
+    之后用隔空投送或数据线把原文件传到电脑，不要用微信/LINE 传（会压缩）。</p>
+</div>
+
+<script src="objects.js"></script>
+<script>
+'use strict';
+// ---------------- 常量 ----------------
+const RINGS = [
+  { name:'低圈', lo:5,  hi:27, tgt:15, nb:24, need:22 },
+  { name:'中圈', lo:27, hi:52, tgt:40, nb:24, need:22 },
+  { name:'高圈', lo:52, hi:77, tgt:65, nb:24, need:22 },
+  { name:'顶部', lo:77, hi:91, tgt:85, nb:8,  need:6  },
+];
+const DWELL = 0.35;      // 每个方位格在稳定状态下停留多少秒算拍到
+const RATE_OK = 25, RATE_MAX = 45;   // 手机转动角速度（度/秒）
+const MIN_RING_S = 25;   // 每圈至少用时（秒）
+const $ = id => document.getElementById(id);
+const LS_KEY = 'capguide_done_v1';
+
+// ---------------- 姿态数学（可单元测试） ----------------
+// W3C deviceorientation: R = Rz(alpha) Rx(beta) Ry(gamma)，设备坐标 x 右 y 上 z 出屏；后置相机朝 -z。
+function poseFromEuler(alpha, beta, gamma) {
+  const d = Math.PI / 180, a = alpha * d, b = beta * d, g = gamma * d;
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cg = Math.cos(g), sg = Math.sin(g);
+  const vx = -(ca * sg + sa * sb * cg), vy = -(sa * sg - ca * sb * cg), vz = -(cb * cg);   // 视线方向（世界系）
+  const elev = Math.asin(Math.max(-1, Math.min(1, -vz))) / d;                             // 向下看的角度 = 相机仰角
+  let az;
+  if (elev < 77) az = Math.atan2(vx, vy) / d + 180;              // 相机所在方位 = 视线方位 + 180
+  else { const ux = -sa * cb, uy = ca * cb; az = Math.atan2(ux, uy) / d; }   // 接近正上方：用手机顶边方向
+  return { elev, az: ((az % 360) + 360) % 360 };
+}
+function ringOf(elev) { for (let i = 0; i < RINGS.length; i++) if (elev >= RINGS[i].lo && elev < RINGS[i].hi) return i; return -1; }
+
+// ---------------- 状态 ----------------
+let cur = { obj: OBJECTS[1].label, pass: 'A' };
+let stream = null, track = null, devices = [], wakeLock = null, audioCtx = null;
+let ori = null, rate = 0, gotOri = false, gotMot = false, sensorsOn = false;
+let recorder = null, chunks = [], bytes = 0, recStart = 0, recording = false, mime = '';
+let cov = null, ringTime = null, ringDoneAt = null, az0 = null, poseLog = [], lastLog = 0, lastT = 0;
+let lockResult = '未锁定', lastFiles = null, startOrient = null;
+
+function loadDone() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { return {}; } }
+function markDone(label, pass) { const d = loadDone(); d[label] = d[label] || {}; d[label][pass] = new Date().toLocaleString(); localStorage.setItem(LS_KEY, JSON.stringify(d)); }
+function objOf(label) { return OBJECTS.find(o => o.label === label); }
+
+// ---------------- 选择界面 ----------------
+function renderSetup() {
+  const done = loadDone();
+  const g = $('objgrid'); g.innerHTML = '';
+  for (const o of OBJECTS) {
+    const b = document.createElement('div');
+    b.className = 'ob' + (o.label === cur.obj ? ' sel' : '');
+    const d = done[o.label] || {};
+    b.innerHTML = `${o.label}<small>${o.reserve ? '候补' : (o.label === 'P0' ? '试拍' : o.id.slice(-4))}</small>` +
+      `<span class="st">${d.A ? '<span class="ok">A✓</span>' : '<span class="mut">A</span>'} ${d.B ? '<span class="ok">B✓</span>' : '<span class="mut">B</span>'}</span>`;
+    b.onclick = () => { cur.obj = o.label; const dd = loadDone()[o.label] || {}; cur.pass = dd.A && !dd.B ? 'B' : 'A'; renderSetup(); };
+    g.appendChild(b);
+  }
+  const o = objOf(cur.obj);
+  $('objcard').innerHTML = `
+    <div><b style="font-size:18px">${o.label}</b> <span class="mut">ABC ${o.id} · ${o.dims.join(' × ')} mm</span></div>
+    <div class="seg"><button id="pA" class="${cur.pass === 'A' ? 'on' : ''}">第 1 遍（A）</button>
+                     <button id="pB" class="${cur.pass === 'B' ? 'on' : ''}">第 2 遍（B）</button></div>
+    <div class="pose ${cur.pass === 'A' ? 'cur' : ''}"><img src="poses/${o.label}_A.jpg" alt="">
+      <div><b>第 1 遍 A</b>（高约 ${o.hA} mm）<br>${o.noteA}<br><span class="mut" style="font-size:12px">图中蓝色的面 = 第 2 遍朝下的面</span></div></div>
+    <div class="pose ${cur.pass === 'B' ? 'cur' : ''}"><img src="poses/${o.label}_B.jpg" alt="">
+      <div><b>第 2 遍 B</b>（高约 ${o.hB} mm）<br>${o.noteB}</div></div>`;
+  $('pA').onclick = () => { cur.pass = 'A'; renderSetup(); };
+  $('pB').onclick = () => { cur.pass = 'B'; renderSetup(); };
+}
+
+// ---------------- 相机 ----------------
+function pickWide(list) {
+  const back = /back|rear|后置|背面|環境|后/i, other = /ultra|超广角|超広角|tele|长焦|望遠|dual|双|デュアル|triple|三|トリプル|front|前置|前面/i;
+  return list.find(d => back.test(d.label) && !other.test(d.label)) || list.find(d => back.test(d.label)) || list[0];
+}
+async function openCamera(deviceId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const v = { width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 30 } };
+  if (deviceId) v.deviceId = { exact: deviceId }; else v.facingMode = { ideal: 'environment' };
+  stream = await navigator.mediaDevices.getUserMedia({ video: v, audio: false });
+  track = stream.getVideoTracks()[0];
+  $('v').srcObject = stream; await $('v').play().catch(() => {});
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (caps.zoom) { try { await track.applyConstraints({ advanced: [{ zoom: Math.max(1, caps.zoom.min || 1) }] }); } catch (e) {} }
+  lockResult = '未锁定'; showRes();
+}
+function showRes() {
+  const s = track ? track.getSettings() : {};
+  $('hudRes').textContent = `${s.width || '?'}×${s.height || '?'} @${Math.round(s.frameRate || 0)}`;
+  $('lockinfo').textContent = `镜头：${track ? track.label : '?'}；曝光/对焦：${lockResult}`;
+}
+async function startCapture() {
+  const env = [];
+  // 1) 陀螺仪权限（iOS 必须在点击里请求）
+  // 两个请求在同一次点击里同时发出（iOS 只认点击时发起的请求）
+  const reqs = [];
+  if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) reqs.push(DeviceOrientationEvent.requestPermission());
+  if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) reqs.push(DeviceMotionEvent.requestPermission());
+  for (const r of await Promise.allSettled(reqs)) env.push('陀螺仪权限：' + (r.status === 'fulfilled' ? r.value : r.reason && r.reason.message));
+  if (!sensorsOn) {
+    sensorsOn = true;
+    window.addEventListener('deviceorientation', e => { if (e.alpha != null) { ori = { a: e.alpha, b: e.beta, g: e.gamma }; gotOri = true; } });
+    window.addEventListener('devicemotion', e => { const r = e.rotationRate; if (r && r.alpha != null) { rate = Math.hypot(r.alpha, r.beta, r.gamma); gotMot = true; } });
+  }
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  // 2) 相机：先随便开一次拿到镜头名称，再切到 1x 主摄
+  try {
+    if (!window.isSecureContext) throw new Error('页面不是 https，浏览器不允许用相机');
+    await openCamera(null);
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    const w = pickWide(devices);
+    if (w && w.deviceId && w.deviceId !== track.getSettings().deviceId) await openCamera(w.deviceId);
+    const sel = $('camSel'); sel.innerHTML = '';
+    for (const d of devices) { const op = document.createElement('option'); op.value = d.deviceId; op.textContent = d.label || d.deviceId.slice(0, 8); if (d.deviceId === track.getSettings().deviceId) op.selected = true; sel.appendChild(op); }
+  } catch (e) { $('env').textContent = env.concat(['打开相机失败：' + e.message]).join('\n'); return; }
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  $('env').textContent = env.join('\n');
+  $('setup').classList.add('hidden'); $('cap').classList.remove('hidden');
+  const o = objOf(cur.obj);
+  $('hudObj').textContent = `${o.label} · 第${cur.pass === 'A' ? 1 : 2}遍(${cur.pass})`;
+  resetCoverage(); requestAnimationFrame(loop);
+}
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && stream && !$('cap').classList.contains('hidden')) { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+});
+
+async function lockExposure() {
+  if (!track) return;
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  const out = [];
+  for (const k of ['exposureMode', 'focusMode', 'whiteBalanceMode']) {
+    const m = caps[k];
+    if (!Array.isArray(m)) { out.push(k.replace('Mode', '') + ' 不支持'); continue; }
+    const want = m.includes('manual') ? 'manual' : (m.includes('single-shot') ? 'single-shot' : null);
+    if (!want) { out.push(k.replace('Mode', '') + ' 不能锁'); continue; }
+    try { await track.applyConstraints({ advanced: [{ [k]: want }] }); out.push(k.replace('Mode', '') + ' 已锁'); }
+    catch (e) { out.push(k.replace('Mode', '') + ' 失败'); }
+  }
+  lockResult = out.join('，');
+  if (!out.some(s => s.includes('已锁'))) lockResult += '（这个浏览器锁不了，保持光线稳定即可）';
+  showRes();
+}
+
+// ---------------- 覆盖统计 ----------------
+function resetCoverage() {
+  cov = RINGS.map(r => new Float32Array(r.nb)); ringTime = RINGS.map(() => 0); ringDoneAt = RINGS.map(() => null);
+  az0 = null; poseLog = []; lastT = performance.now();
+}
+function covered(i) { let n = 0; for (const t of cov[i]) if (t >= DWELL) n++; return n; }
+function firstTodo() { for (let i = 0; i < RINGS.length; i++) if (covered(i) < RINGS[i].need) return i; return -1; }
+function beep(f) { if (!audioCtx) return; try { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = f; g.gain.value = 0.15; o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.18); } catch (e) {} }
+
+function loop(now) {
+  if ($('cap').classList.contains('hidden')) return;
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  let p = null;
+  if (ori) p = poseFromEuler(ori.a, ori.b, ori.g);
+  if (recording && p) {
+    if (az0 === null && p.elev < 77) az0 = p.az;
+    const rel = az0 === null ? p.az : ((p.az - az0) % 360 + 360) % 360;
+    const ri = ringOf(p.elev);
+    if (ri >= 0) {
+      ringTime[ri] += dt;
+      if (rate < RATE_MAX) {
+        const k = Math.floor(rel / 360 * RINGS[ri].nb) % RINGS[ri].nb;
+        const before = covered(ri);
+        cov[ri][k] += dt;
+        if (before < RINGS[ri].need && covered(ri) >= RINGS[ri].need) { ringDoneAt[ri] = ringTime[ri]; beep(ringTime[ri] < MIN_RING_S && ri < 3 ? 440 : 880); }
+      }
+    }
+    if (now - lastLog > 33) {
+      lastLog = now;
+      poseLog.push([Math.round(now - recStart), +ori.a.toFixed(2), +ori.b.toFixed(2), +ori.g.toFixed(2), +p.elev.toFixed(2), +rel.toFixed(2), +rate.toFixed(1)]);
+    }
+    const t = (now - recStart) / 1000;
+    $('hudRec').innerHTML = `<span class="recdot">● REC</span> ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    $('hudSize').textContent = (bytes / 1e6).toFixed(0) + ' MB';
+  }
+  drawMap(p); updateGuide(p); placeBox();
+  requestAnimationFrame(loop);
+}
+
+function drawMap(p) {
+  const c = $('map'), x = c.getContext('2d'), W = c.width, H = c.height;
+  x.clearRect(0, 0, W, H);
+  const R = H / 2 - 8, cx = R + 8, cy = H / 2;
+  const rad = e => R * (90 - e) / 90;
+  const todo = firstTodo();
+  for (let i = 0; i < RINGS.length; i++) {
+    const r = RINGS[i], r0 = rad(Math.min(r.hi, 90)), r1 = rad(r.lo);
+    for (let k = 0; k < r.nb; k++) {
+      const a0 = (k / r.nb * 360 + 90) * Math.PI / 180, a1 = ((k + 1) / r.nb * 360 + 90) * Math.PI / 180;
+      const f = Math.min(1, cov[i][k] / DWELL);
+      x.beginPath(); x.arc(cx, cy, r1, a0, a1); x.arc(cx, cy, r0, a1, a0, true); x.closePath();
+      x.fillStyle = f >= 1 ? 'rgba(62,207,110,.85)' : `rgba(255,255,255,${0.10 + 0.35 * f})`; x.fill();
+      x.strokeStyle = 'rgba(0,0,0,.5)'; x.lineWidth = 1; x.stroke();
+    }
+    if (i === todo) { x.beginPath(); x.arc(cx, cy, (r0 + r1) / 2, 0, 2 * Math.PI); x.strokeStyle = 'rgba(255,204,51,.9)'; x.lineWidth = Math.max(2, r1 - r0 - 2); x.globalAlpha = .25; x.stroke(); x.globalAlpha = 1; }
+  }
+  // 起点标记
+  x.fillStyle = '#aaa'; x.font = '20px sans-serif'; x.textAlign = 'center'; x.fillText('起点', cx, H - 1);
+  if (p) {
+    const rel = az0 === null ? 0 : ((p.az - az0) % 360 + 360) % 360;
+    const a = (rel + 90) * Math.PI / 180, r = rad(Math.max(0, Math.min(90, p.elev)));
+    x.beginPath(); x.arc(cx + r * Math.cos(a), cy + r * Math.sin(a), 9, 0, 2 * Math.PI);
+    x.fillStyle = rate > RATE_MAX ? '#ff5a4f' : (rate > RATE_OK ? '#ffcc33' : '#4da3ff'); x.fill();
+    x.strokeStyle = '#fff'; x.lineWidth = 2; x.stroke();
+  }
+  // 右侧仰角条
+  const gx = 2 * R + 40, gw = 22, gy0 = 14, gy1 = H - 14, ey = e => gy1 - (gy1 - gy0) * e / 90;
+  for (let i = 0; i < RINGS.length; i++) {
+    const r = RINGS[i];
+    x.fillStyle = i === todo ? 'rgba(255,204,51,.45)' : (covered(i) >= r.need ? 'rgba(62,207,110,.6)' : 'rgba(255,255,255,.15)');
+    x.fillRect(gx, ey(Math.min(90, r.hi)), gw, ey(r.lo) - ey(Math.min(90, r.hi)) - 2);
+  }
+  x.fillStyle = '#ddd'; x.font = '20px sans-serif'; x.textAlign = 'left';
+  for (const e of [15, 40, 65, 90]) x.fillText(e + '°', gx + gw + 6, ey(e) + 7);
+  if (p) { const y = ey(Math.max(0, Math.min(90, p.elev))); x.fillStyle = '#4da3ff'; x.fillRect(gx - 8, y - 3, gw + 16, 6); }
+}
+
+function updateGuide(p) {
+  const g = $('guide'), sp = $('speed'), wb = $('warnbar');
+  if (!gotOri) { g.innerHTML = '<span class="bad">没有陀螺仪数据</span>：请在 iPhone 设置 › Safari 里允许“运动与方向访问”，然后刷新'; return; }
+  sp.innerHTML = p ? `仰角 <b>${p.elev.toFixed(0)}°</b> · ` + (rate > RATE_MAX ? '<span class="bad">太快 / 晃动</span>' : rate > RATE_OK ? '<span class="warn">稍快</span>' : '<span class="ok">稳</span>') : '';
+  let warn = '';
+  if (recording && startOrient !== null && screenOrient() !== startOrient) warn = '不要转屏！保持开始时的握持方向';
+  else if (recording && rate > RATE_MAX) warn = '慢一点';
+  wb.textContent = warn; wb.classList.toggle('hidden', !warn);
+  if (!recording) { g.textContent = '把物体放进虚线框，锁定曝光后点“开始录制”'; return; }
+  const t = firstTodo();
+  if (t < 0) { g.innerHTML = '<span class="ok">四个高度都拍完了 ✓</span> 可以点“停止”'; return; }
+  const r = RINGS[t], ri = p ? ringOf(p.elev) : -1, n = covered(t);
+  let s = `${r.name}（约 ${r.tgt}°）：${n}/${r.nb}　`;
+  if (ri === t) s += t === 3 ? '从正上方往下拍，慢慢转一圈手机' : '保持这个高度，慢慢绕一整圈';
+  else if (p && p.elev < r.lo) s += '↑ 手机抬高，更往下看';
+  else s += '↓ 手机放低，更平视';
+  g.textContent = s;
+}
+function screenOrient() { return (screen.orientation && screen.orientation.type) ? screen.orientation.type.split('-')[0] : (Math.abs(window.orientation || 0) === 90 ? 'landscape' : 'portrait'); }
+
+function placeBox() {
+  const v = $('v'), b = $('box');
+  if (!v.videoWidth) return;
+  const W = v.clientWidth, H = v.clientHeight, s = Math.min(W / v.videoWidth, H / v.videoHeight);
+  const vw = v.videoWidth * s, vh = v.videoHeight * s, ox = (W - vw) / 2, oy = (H - vh) / 2;
+  const side = 0.72 * Math.min(vw, vh);
+  b.style.left = (ox + (vw - side) / 2) + 'px'; b.style.top = (oy + (vh - side) / 2) + 'px';
+  b.style.width = side + 'px'; b.style.height = side + 'px';
+}
+
+// ---------------- 录制 ----------------
+function pickMime() {
+  const c = ['video/mp4;codecs=avc1.640034', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+  if (!window.MediaRecorder) return null;
+  for (const m of c) if (MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+function stamp() { const d = new Date(), z = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; }
+let recStamp = '';
+function startRec() {
+  mime = pickMime();
+  if (mime === null) { alert('这个浏览器不支持网页录像（需要 iOS 14.5 以上的 Safari）'); return; }
+  const s = track.getSettings(), big = (s.width || 0) * (s.height || 0) > 4e6;
+  chunks = []; bytes = 0;
+  try { recorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: big ? 25e6 : 12e6 } : {}); }
+  catch (e) { recorder = new MediaRecorder(stream); }
+  mime = recorder.mimeType || mime || 'video/mp4';
+  recorder.ondataavailable = e => { if (e.data && e.data.size) { chunks.push(e.data); bytes += e.data.size; } };
+  recorder.onstop = finishRec;
+  resetCoverage(); recStart = performance.now(); recStamp = stamp(); startOrient = screenOrient();
+  recorder.start(1000); recording = true;
+  $('btnRec').textContent = '■ 停止'; $('btnBack').disabled = true; $('camSel').disabled = true;
+}
+function stopRec() { if (recorder && recording) { recording = false; recorder.stop(); } }
+function finishRec() {
+  const o = objOf(cur.obj), dur = (performance.now() - recStart) / 1000;
+  const base = `${o.label}_${o.id}_pass${cur.pass}_${recStamp}`;
+  const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+  const blob = new Blob(chunks, { type: mime.split(';')[0] });
+  const s = track.getSettings();
+  const meta = {
+    tool: 'capture_guide v1', object: o.label, abc_id: o.id, pass: cur.pass, placement: cur.pass === 'A' ? o.noteA : o.noteB,
+    started: recStamp, duration_s: +dur.toFixed(2), mime, bytes, camera_label: track.label, settings: s,
+    exposure_lock: lockResult, screen_orientation_at_start: startOrient, user_agent: navigator.userAgent,
+    rings: RINGS.map((r, i) => ({ name: r.name, lo: r.lo, hi: r.hi, bins: r.nb, covered: covered(i), seconds: +ringTime[i].toFixed(1), done_after_s: ringDoneAt[i] })),
+    coverage_seconds: cov.map(a => Array.from(a, v => +v.toFixed(2))),
+    pose_columns: ['t_ms_since_record_start', 'alpha', 'beta', 'gamma', 'elev_deg', 'azimuth_rel_deg', 'rot_rate_dps'],
+    pose: poseLog,
+  };
+  lastFiles = {
+    video: new File([blob], `${base}.${ext}`, { type: mime.split(';')[0] }),
+    pose: new File([JSON.stringify(meta)], `${base}_pose.json`, { type: 'application/json' }),
+    meta,
+  };
+  $('btnRec').textContent = '● 开始录制'; $('btnBack').disabled = false; $('camSel').disabled = false;
+  showSave();
+}
+
+// ---------------- 保存界面 ----------------
+function showSave() {
+  const m = lastFiles.meta;
+  $('cap').classList.add('hidden'); $('save').classList.remove('hidden');
+  $('sumTxt').innerHTML = `<b>${m.object}</b> 第${m.pass === 'A' ? 1 : 2}遍 · ${m.duration_s.toFixed(0)} 秒 · ${(m.bytes / 1e6).toFixed(0)} MB · ${m.settings.width}×${m.settings.height}<br>
+    <span class="mut">${lastFiles.video.name}</span>`;
+  let rows = '<tr><th>高度</th><th>覆盖</th><th>用时</th></tr>', warns = [];
+  m.rings.forEach((r, i) => {
+    const ok = r.covered >= RINGS[i].need;
+    rows += `<tr><td>${r.name}</td><td class="${ok ? 'ok' : 'bad'}">${r.covered}/${r.bins}</td><td>${r.seconds.toFixed(0)} s</td></tr>`;
+    if (!ok) warns.push(`${r.name}没拍全`);
+    else if (i < 3 && r.done_after_s !== null && r.done_after_s < MIN_RING_S) warns.push(`${r.name}走得太快（${r.done_after_s.toFixed(0)} 秒）`);
+  });
+  $('sumTab').innerHTML = rows;
+  $('sumWarn').textContent = warns.length ? '注意：' + warns.join('；') + '。建议重拍这一遍。' : '';
+  $('btnNext').textContent = m.pass === 'A' ? `下一步：按右图重新放好，拍第 2 遍（B）` : '下一步：换下一个物体';
+}
+function share(files) {
+  if (navigator.canShare && navigator.canShare({ files })) {
+    navigator.share({ files }).then(() => markDone(lastFiles.meta.object, lastFiles.meta.pass)).catch(e => { if (e.name !== 'AbortError') alert('分享失败：' + e.message); });
+  } else {
+    for (const f of files) { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
+    markDone(lastFiles.meta.object, lastFiles.meta.pass);
+  }
+}
+
+// ---------------- 按钮 ----------------
+$('btnStart').onclick = startCapture;
+$('btnLock').onclick = lockExposure;
+$('btnRec').onclick = () => recording ? stopRec() : startRec();
+$('btnBack').onclick = () => { $('cap').classList.add('hidden'); $('setup').classList.remove('hidden'); renderSetup(); };
+$('camSel').onchange = e => openCamera(e.target.value).catch(err => alert('切换镜头失败：' + err.message));
+$('btnShareBoth').onclick = () => share([lastFiles.video, lastFiles.pose]);
+$('btnShareVid').onclick = () => share([lastFiles.video]);
+$('btnRetake').onclick = () => { if (!confirm('确定不保存，直接重拍？')) return; lastFiles = null; chunks = []; backToCap(); };
+$('btnNext').onclick = () => {
+  const d = loadDone()[cur.obj] || {};
+  if (!d[cur.pass] && !confirm('这一遍还没保存（或保存没有成功），确定继续？视频会被清掉。')) return;
+  const wasA = lastFiles && lastFiles.meta.pass === 'A';
+  lastFiles = null; chunks = [];
+  if (wasA) { cur.pass = 'B'; backToCap(); }
+  else {
+    const i = OBJECTS.findIndex(o => o.label === cur.obj);
+    const nxt = OBJECTS.slice(i + 1).find(o => !o.reserve);
+    if (nxt) { cur.obj = nxt.label; cur.pass = 'A'; }
+    $('save').classList.add('hidden'); $('cap').classList.add('hidden'); $('setup').classList.remove('hidden'); renderSetup();
+  }
+};
+function backToCap() {
+  const o = objOf(cur.obj);
+  $('save').classList.add('hidden'); $('cap').classList.remove('hidden');
+  $('hudObj').textContent = `${o.label} · 第${cur.pass === 'A' ? 1 : 2}遍(${cur.pass})`;
+  $('hudRec').textContent = ''; $('hudSize').textContent = '';
+  resetCoverage(); requestAnimationFrame(loop);
+}
+
+renderSetup();
+if (!window.isSecureContext) $('env').textContent = '提示：需要用 https 地址打开，否则不能用相机。';
+</script>
+</body>
+</html>
