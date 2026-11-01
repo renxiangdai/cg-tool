@@ -216,13 +216,11 @@ async function openCamera(deviceId) {
   stream = await navigator.mediaDevices.getUserMedia({ video: v, audio: false });
   track = stream.getVideoTracks()[0];
   $('v').srcObject = stream; await $('v').play().catch(() => {});
-  const caps = track.getCapabilities ? track.getCapabilities() : {};
-  if (caps.zoom) { try { await track.applyConstraints({ advanced: [{ zoom: Math.max(1, caps.zoom.min || 1) }] }); } catch (e) {} }
   lockResult = '未锁定'; showRes();
 }
 function showRes() {
   const s = track ? track.getSettings() : {};
-  $('hudRes').textContent = `${s.width || '?'}×${s.height || '?'} @${Math.round(s.frameRate || 0)}`;
+  $('hudRes').textContent = `${track ? track.label : ''} ${s.width || '?'}×${s.height || '?'} @${Math.round(s.frameRate || 0)}`;
   $('lockinfo').textContent = `镜头：${track ? track.label : '?'}；曝光/对焦：${lockResult}`;
 }
 async function startCapture() {
@@ -239,13 +237,16 @@ async function startCapture() {
     window.addEventListener('devicemotion', e => { const r = e.rotationRate; if (r && r.alpha != null) { rate = Math.hypot(r.alpha, r.beta, r.gamma); gotMot = true; } });
   }
   try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-  // 2) 相机：先随便开一次拿到镜头名称，再切到 1x 主摄
+  // 2) 相机：直接打开 1x 主摄（后置相机）；从选择界面回来时沿用已打开的相机
   try {
     if (!window.isSecureContext) throw new Error('页面不是 https，浏览器不允许用相机');
-    await openCamera(null);
-    devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-    const w = pickWide(devices);
-    if (w && w.deviceId && w.deviceId !== track.getSettings().deviceId) await openCamera(w.deviceId);
+    if (!(stream && track && track.readyState === 'live')) {
+      const vids = async () => (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      devices = await vids();
+      let w = devices.some(d => d.label) ? pickWide(devices) : null;
+      await openCamera(w ? w.deviceId : null);
+      if (!w) { devices = await vids(); w = pickWide(devices); if (w && w.deviceId && w.deviceId !== track.getSettings().deviceId) await openCamera(w.deviceId); }
+    }
     const sel = $('camSel'); sel.innerHTML = '';
     for (const d of devices) { const op = document.createElement('option'); op.value = d.deviceId; op.textContent = d.label || d.deviceId.slice(0, 8); if (d.deviceId === track.getSettings().deviceId) op.selected = true; sel.appendChild(op); }
   } catch (e) { $('env').textContent = env.concat(['打开相机失败：' + e.message]).join('\n'); return; }
@@ -273,7 +274,7 @@ async function lockExposure() {
     catch (e) { out.push(k.replace('Mode', '') + ' 失败'); }
   }
   lockResult = out.join('，');
-  if (!out.some(s => s.includes('已锁'))) lockResult += '（这个浏览器锁不了，保持光线稳定即可）';
+  if (!out.some(s => s.startsWith('exposure') && s.includes('已锁'))) lockResult += '。曝光网页锁不了：光线保持均匀，垫子铺满背景，避免画面里出现窗户或亮灯';
   showRes();
 }
 
@@ -361,6 +362,7 @@ function updateGuide(p) {
   let warn = '';
   if (recording && startOrient !== null && screenOrient() !== startOrient) warn = '不要转屏！保持开始时的握持方向';
   else if (recording && rate > RATE_MAX) warn = '慢一点';
+  else { const v = $('v'); if (v.videoWidth && (v.videoWidth > v.videoHeight) !== (innerWidth > innerHeight)) warn = '画面方向和屏幕不一致：把手机横过来拿（建议横屏拍）'; }
   wb.textContent = warn; wb.classList.toggle('hidden', !warn);
   if (!recording) { g.textContent = '把物体放进虚线框，锁定曝光后点“开始录制”'; return; }
   const t = firstTodo();
