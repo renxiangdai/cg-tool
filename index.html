@@ -356,7 +356,7 @@ function drawMap(p) {
 
 function updateGuide(p) {
   const g = $('guide'), sp = $('speed'), wb = $('warnbar');
-  if (!gotOri) { g.innerHTML = '<span class="bad">没有陀螺仪数据</span>：请在 iPhone 设置 › Safari 里允许“运动与方向访问”，然后刷新'; return; }
+  if (!gotOri) { g.innerHTML = '<span class="bad">没有陀螺仪数据</span>：返回后重新点“打开相机开始拍”，弹窗里点“允许”。之前点过拒绝的话，到 设置 › Safari › 高级 › 网站数据 删除 github.io，再刷新'; return; }
   sp.innerHTML = p ? `仰角 <b>${p.elev.toFixed(0)}°</b> · ` + (rate > RATE_MAX ? '<span class="bad">太快 / 晃动</span>' : rate > RATE_OK ? '<span class="warn">稍快</span>' : '<span class="ok">稳</span>') : '';
   let warn = '';
   if (recording && startOrient !== null && screenOrient() !== startOrient) warn = '不要转屏！保持开始时的握持方向';
