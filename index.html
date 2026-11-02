@@ -71,17 +71,18 @@
 
 <!-- ========== 1. 选择物体 ========== -->
 <div id="setup">
-  <h1>环拍助手 <span class="mut" style="font-size:13px">打印件实拍</span></h1>
+  <h1>环拍助手 <span class="mut" style="font-size:13px">打印件实拍 · v2（11-02）</span></h1>
   <div class="grid" id="objgrid"></div>
   <div class="card" id="objcard"></div>
   <details>
     <summary>拍摄前检查（每次开拍前看一眼）</summary>
     <ol>
-      <li>物体放在<b>有纹理、不是纯白</b>的垫子/桌布中间，周围 30 cm 内不要有别的东西挪动。</li>
+      <li>物体放在 <b>ChArUco 标定板中间</b>，板子四边贴平、拍摄中不要动；周围 30 cm 内不要有别的东西挪动。</li>
+      <li><b>每一帧都要带上一圈标记</b>：近拍时也别让物体占满画面。</li>
       <li>光线均匀柔和：不要直射阳光，背景里不要有窗户或很亮的灯。</li>
       <li>手机<b>全程同一个握持方向</b>（建议横屏），不要中途转屏。</li>
       <li>离物体约 30–40 cm，物体始终在虚线框内、四周留空，不要拍到出画。</li>
-      <li>先绕低圈（约 15°）、再中圈（约 40°）、再高圈（约 65°），最后从正上方拍几秒；每圈走慢一点，30 秒以上。</li>
+      <li>先绕低圈（约 15–20°，<b>不要低于 10°</b>）、再中圈（约 40°）、再高圈（约 65°），最后从正上方拍几秒；每圈走慢一点，30 秒以上。</li>
       <li>第 1 遍拍完后，按“第 2 遍 B”的图重新放好，同样的路线再拍一次。</li>
       <li>拍的过程中不要碰物体和垫子。</li>
     </ol>
@@ -141,7 +142,7 @@
 'use strict';
 // ---------------- 常量 ----------------
 const RINGS = [
-  { name:'低圈', lo:5,  hi:27, tgt:15, nb:24, need:22 },
+  { name:'低圈', lo:10, hi:27, tgt:18, nb:24, need:22 },
   { name:'中圈', lo:27, hi:52, tgt:40, nb:24, need:22 },
   { name:'高圈', lo:52, hi:77, tgt:65, nb:24, need:22 },
   { name:'顶部', lo:77, hi:91, tgt:85, nb:8,  need:6  },
@@ -149,6 +150,7 @@ const RINGS = [
 const DWELL = 0.35;      // 每个方位格在稳定状态下停留多少秒算拍到
 const RATE_OK = 25, RATE_MAX = 45;   // 手机转动角速度（度/秒）
 const MIN_RING_S = 25;   // 每圈至少用时（秒）
+const ELEV_MIN = 10;     // 低于这个仰角标记板压得太扁，提示抬高
 const $ = id => document.getElementById(id);
 const LS_KEY = 'capguide_done_v1';
 
@@ -362,6 +364,7 @@ function updateGuide(p) {
   let warn = '';
   if (recording && startOrient !== null && screenOrient() !== startOrient) warn = '不要转屏！保持开始时的握持方向';
   else if (recording && rate > RATE_MAX) warn = '慢一点';
+  else if (p && p.elev < ELEV_MIN) warn = '太低了，抬高一点（低圈约 15–20°，不低于 10°）';
   else { const v = $('v'); if (v.videoWidth && (v.videoWidth > v.videoHeight) !== (innerWidth > innerHeight)) warn = '画面方向和屏幕不一致：把手机横过来拿（建议横屏拍）'; }
   wb.textContent = warn; wb.classList.toggle('hidden', !warn);
   if (!recording) { g.textContent = '把物体放进虚线框，锁定曝光后点“开始录制”'; return; }
