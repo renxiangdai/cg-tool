@@ -25,6 +25,11 @@
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:6px; }
   .ob { padding:8px 4px; text-align:center; border-radius:8px; background:#222; font-weight:600; position:relative; }
   .ob.sel { outline:2px solid var(--acc); }
+  .ob.redo { background:#3a2a12; }
+  .rd { display:flex; gap:8px; align-items:center; padding:6px 4px; border-bottom:1px solid #333; }
+  .rd:last-child { border-bottom:0; }
+  .rd b { min-width:3.2em; }
+  .redonote { margin-top:8px; padding:8px; border-radius:8px; background:#3a2a12; }
   .ob small { display:block; font-weight:400; font-size:11px; color:var(--mut); }
   .ob .st { font-size:11px; font-weight:400; }
   .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .mut { color:var(--mut); }
@@ -71,13 +76,17 @@
 
 <!-- ========== 1. 选择物体 ========== -->
 <div id="setup">
-  <h1>环拍助手 <span class="mut" style="font-size:13px">打印件实拍 · v2（11-02）</span></h1>
+  <h1>环拍助手 <span class="mut" style="font-size:13px">打印件实拍 · v3（11-03 重拍）</span></h1>
+  <div class="card" id="redocard"></div>
+  <h2>全部物体</h2>
   <div class="grid" id="objgrid"></div>
   <div class="card" id="objcard"></div>
   <details>
     <summary>拍摄前检查（每次开拍前看一眼）</summary>
     <ol>
-      <li>物体放在 <b>ChArUco 标定板中间</b>，板子四边贴平、拍摄中不要动；周围 30 cm 内不要有别的东西挪动。</li>
+      <li><b>先在桌上铺一块深色布</b>（黑色或深灰、哑光、没有图案，至少 1 m × 1 m），板子放在布的中间。
+        不用竖起来围一圈，平铺就行：相机放低时，零件上边缘背后看到的是板子后面三四十厘米处的桌面，这块布要把那里盖住，不能是白桌面、白墙或白纸。</li>
+      <li>物体放在 <b>ChArUco 标定板正中</b>，凸出的部分（凸块、方块、薄片）朝向棋盘格，不要朝向板子的白边；板子四边贴平、拍摄中不要动；周围 30 cm 内不要有别的东西挪动。</li>
       <li><b>每一帧都要带上一圈标记</b>：近拍时也别让物体占满画面。</li>
       <li>光线均匀柔和：不要直射阳光，背景里不要有窗户或很亮的灯。</li>
       <li>手机<b>全程同一个握持方向</b>（建议横屏），不要中途转屏。</li>
@@ -153,6 +162,7 @@ const MIN_RING_S = 25;   // 每圈至少用时（秒）
 const ELEV_MIN = 10;     // 低于这个仰角标记板压得太扁，提示抬高
 const $ = id => document.getElementById(id);
 const LS_KEY = 'capguide_done_v1';
+const LS_REDO = 'capguide_redo_20261103';
 
 // ---------------- 姿态数学（可单元测试） ----------------
 // W3C deviceorientation: R = Rz(alpha) Rx(beta) Ry(gamma)，设备坐标 x 右 y 上 z 出屏；后置相机朝 -z。
@@ -169,6 +179,7 @@ function poseFromEuler(alpha, beta, gamma) {
 function ringOf(elev) { for (let i = 0; i < RINGS.length; i++) if (elev >= RINGS[i].lo && elev < RINGS[i].hi) return i; return -1; }
 
 // ---------------- 状态 ----------------
+const firstRedo = () => REDO.find(r => !redoDone(r.obj, r.pass));
 let cur = { obj: OBJECTS[1].label, pass: 'A' };
 let stream = null, track = null, devices = [], wakeLock = null, audioCtx = null;
 let ori = null, rate = 0, gotOri = false, gotMot = false, sensorsOn = false;
@@ -176,32 +187,68 @@ let recorder = null, chunks = [], bytes = 0, recStart = 0, recording = false, mi
 let cov = null, ringTime = null, ringDoneAt = null, az0 = null, poseLog = [], lastLog = 0, lastT = 0;
 let lockResult = '未锁定', lastFiles = null, startOrient = null;
 
-function loadDone() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { return {}; } }
-function markDone(label, pass) { const d = loadDone(); d[label] = d[label] || {}; d[label][pass] = new Date().toLocaleString(); localStorage.setItem(LS_KEY, JSON.stringify(d)); }
+function loadKey(k) { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) { return {}; } }
+function loadDone() { return loadKey(LS_KEY); }
+function redoOf(label, pass) { return REDO.find(r => r.obj === label && r.pass === pass); }
+function redoDone(label, pass) { return !!(loadKey(LS_REDO)[label] || {})[pass]; }
+function markDone(label, pass) {
+  const k = redoOf(label, pass) ? LS_REDO : LS_KEY;   // 重拍任务单独记，不和上次的 A✓/B✓ 混在一起
+  const d = loadKey(k); d[label] = d[label] || {}; d[label][pass] = new Date().toLocaleString(); localStorage.setItem(k, JSON.stringify(d));
+}
+function passDone(label, pass) { return redoOf(label, pass) ? redoDone(label, pass) : !!(loadDone()[label] || {})[pass]; }
+function nextRedo(label, pass) { const i = REDO.findIndex(r => r.obj === label && r.pass === pass); return REDO.slice(i + 1).concat(REDO.slice(0, i)).find(r => !redoDone(r.obj, r.pass)); }
+function passName(label, pass) { return `第${pass === 'A' ? 1 : 2}遍(${pass})${redoOf(label, pass) ? ' · 重拍' : ''}`; }
 function objOf(label) { return OBJECTS.find(o => o.label === label); }
 
 // ---------------- 选择界面 ----------------
 function renderSetup() {
   const done = loadDone();
+  // 重拍任务清单
+  let rh = '<div><b>11-03 重拍任务</b> <span class="mut" style="font-size:12px">点一行直接选中；只拍列出的那一遍</span></div>';
+  for (const r of REDO) {
+    const ok = redoDone(r.obj, r.pass), on = r.obj === cur.obj && r.pass === cur.pass;
+    rh += `<div class="rd" data-o="${r.obj}" data-p="${r.pass}" style="${on ? 'outline:2px solid var(--acc); border-radius:8px' : ''}">
+      <b>${r.obj}</b><span style="white-space:nowrap">第 ${r.pass === 'A' ? 1 : 2} 遍（${r.pass}）</span>
+      <span class="${ok ? 'ok' : 'warn'}" style="white-space:nowrap">${ok ? '✓ 已保存' : '待拍'}</span>
+      <span class="mut" style="font-size:12px">${r.why}</span></div>`;
+  }
+  $('redocard').innerHTML = rh;
+  for (const el of $('redocard').querySelectorAll('.rd')) el.onclick = () => { cur.obj = el.dataset.o; cur.pass = el.dataset.p; renderSetup(); };
   const g = $('objgrid'); g.innerHTML = '';
   for (const o of OBJECTS) {
     const b = document.createElement('div');
-    b.className = 'ob' + (o.label === cur.obj ? ' sel' : '');
+    const hasRedo = REDO.some(r => r.obj === o.label);
+    b.className = 'ob' + (hasRedo ? ' redo' : '') + (o.label === cur.obj ? ' sel' : '');
     const d = done[o.label] || {};
+    const badge = p => redoOf(o.label, p) ? (redoDone(o.label, p) ? `<span class="ok">重${p}✓</span>` : `<span class="warn">重${p}</span>`)
+                                          : (d[p] ? `<span class="ok">${p}✓</span>` : `<span class="mut">${p}</span>`);
     b.innerHTML = `${o.label}<small>${o.reserve ? '候补' : (o.label === 'P0' ? '试拍' : o.id.slice(-4))}</small>` +
-      `<span class="st">${d.A ? '<span class="ok">A✓</span>' : '<span class="mut">A</span>'} ${d.B ? '<span class="ok">B✓</span>' : '<span class="mut">B</span>'}</span>`;
-    b.onclick = () => { cur.obj = o.label; const dd = loadDone()[o.label] || {}; cur.pass = dd.A && !dd.B ? 'B' : 'A'; renderSetup(); };
+      `<span class="st">${badge('A')} ${badge('B')}</span>`;
+    b.onclick = () => {
+      cur.obj = o.label;
+      const todo = REDO.find(r => r.obj === o.label && !redoDone(r.obj, r.pass)) || REDO.find(r => r.obj === o.label);
+      cur.pass = todo ? todo.pass : (passDone(o.label, 'A') && !passDone(o.label, 'B') ? 'B' : 'A');
+      renderSetup();
+    };
     g.appendChild(b);
   }
   const o = objOf(cur.obj);
+  const anyRedo = REDO.some(r => r.obj === o.label);
+  const poseHtml = p => {
+    const r = redoOf(o.label, p), h = r && r.h ? r.h : (p === 'A' ? o.hA : o.hB);
+    const img = r && r.img ? r.img : `${o.label}_${p}.jpg`;
+    const note = r && r.note ? r.note : (p === 'A' ? o.noteA : o.noteB);
+    const extra = r ? `<div class="redonote"><b>这一遍要重拍。</b>原因：${r.why}</div>`
+                    : (anyRedo ? '<div class="mut" style="font-size:12px; margin-top:6px">这一遍不用重拍，沿用上次的视频。</div>' : '');
+    const blue = p === 'A' ? '<br><span class="mut" style="font-size:12px">图中蓝色的面 = 第 2 遍朝下的面</span>' : '';
+    return `<div class="pose ${cur.pass === p ? 'cur' : ''}"><img src="poses/${img}" alt="">
+      <div><b>第 ${p === 'A' ? 1 : 2} 遍 ${p}</b>（高约 ${h} mm）<br>${note}${blue}${extra}</div></div>`;
+  };
   $('objcard').innerHTML = `
     <div><b style="font-size:18px">${o.label}</b> <span class="mut">ABC ${o.id} · ${o.dims.join(' × ')} mm</span></div>
     <div class="seg"><button id="pA" class="${cur.pass === 'A' ? 'on' : ''}">第 1 遍（A）</button>
                      <button id="pB" class="${cur.pass === 'B' ? 'on' : ''}">第 2 遍（B）</button></div>
-    <div class="pose ${cur.pass === 'A' ? 'cur' : ''}"><img src="poses/${o.label}_A.jpg" alt="">
-      <div><b>第 1 遍 A</b>（高约 ${o.hA} mm）<br>${o.noteA}<br><span class="mut" style="font-size:12px">图中蓝色的面 = 第 2 遍朝下的面</span></div></div>
-    <div class="pose ${cur.pass === 'B' ? 'cur' : ''}"><img src="poses/${o.label}_B.jpg" alt="">
-      <div><b>第 2 遍 B</b>（高约 ${o.hB} mm）<br>${o.noteB}</div></div>`;
+    ${poseHtml('A')}${poseHtml('B')}`;
   $('pA').onclick = () => { cur.pass = 'A'; renderSetup(); };
   $('pB').onclick = () => { cur.pass = 'B'; renderSetup(); };
 }
@@ -256,7 +303,7 @@ async function startCapture() {
   $('env').textContent = env.join('\n');
   $('setup').classList.add('hidden'); $('cap').classList.remove('hidden');
   const o = objOf(cur.obj);
-  $('hudObj').textContent = `${o.label} · 第${cur.pass === 'A' ? 1 : 2}遍(${cur.pass})`;
+  $('hudObj').textContent = `${o.label} · ${passName(o.label, cur.pass)}`;
   resetCoverage(); requestAnimationFrame(loop);
 }
 document.addEventListener('visibilitychange', async () => {
@@ -415,12 +462,14 @@ function startRec() {
 function stopRec() { if (recorder && recording) { recording = false; recorder.stop(); } }
 function finishRec() {
   const o = objOf(cur.obj), dur = (performance.now() - recStart) / 1000;
-  const base = `${o.label}_${o.id}_pass${cur.pass}_${recStamp}`;
+  const rd = redoOf(o.label, cur.pass);
+  const base = `${o.label}_${o.id}_pass${cur.pass}${rd ? '_redo' : ''}_${recStamp}`;
   const ext = mime.includes('mp4') ? 'mp4' : 'webm';
   const blob = new Blob(chunks, { type: mime.split(';')[0] });
   const s = track.getSettings();
   const meta = {
-    tool: 'capture_guide v1', object: o.label, abc_id: o.id, pass: cur.pass, placement: cur.pass === 'A' ? o.noteA : o.noteB,
+    tool: 'capture_guide v3', object: o.label, abc_id: o.id, pass: cur.pass, redo: !!rd, redo_reason: rd ? rd.why : null,
+    placement: rd && rd.note ? rd.note.replace(/<[^>]+>/g, '') : (cur.pass === 'A' ? o.noteA : o.noteB), placement_image: rd && rd.img ? rd.img : `${o.label}_${cur.pass}.jpg`,
     started: recStamp, duration_s: +dur.toFixed(2), mime, bytes, camera_label: track.label, settings: s,
     exposure_lock: lockResult, screen_orientation_at_start: startOrient, user_agent: navigator.userAgent,
     rings: RINGS.map((r, i) => ({ name: r.name, lo: r.lo, hi: r.hi, bins: r.nb, covered: covered(i), seconds: +ringTime[i].toFixed(1), done_after_s: ringDoneAt[i] })),
@@ -441,7 +490,7 @@ function finishRec() {
 function showSave() {
   const m = lastFiles.meta;
   $('cap').classList.add('hidden'); $('save').classList.remove('hidden');
-  $('sumTxt').innerHTML = `<b>${m.object}</b> 第${m.pass === 'A' ? 1 : 2}遍 · ${m.duration_s.toFixed(0)} 秒 · ${(m.bytes / 1e6).toFixed(0)} MB · ${m.settings.width}×${m.settings.height}<br>
+  $('sumTxt').innerHTML = `<b>${m.object}</b> ${passName(m.object, m.pass)} · ${m.duration_s.toFixed(0)} 秒 · ${(m.bytes / 1e6).toFixed(0)} MB · ${m.settings.width}×${m.settings.height}<br>
     <span class="mut">${lastFiles.video.name}</span>`;
   let rows = '<tr><th>高度</th><th>覆盖</th><th>用时</th></tr>', warns = [];
   m.rings.forEach((r, i) => {
@@ -452,7 +501,9 @@ function showSave() {
   });
   $('sumTab').innerHTML = rows;
   $('sumWarn').textContent = warns.length ? '注意：' + warns.join('；') + '。建议重拍这一遍。' : '';
-  $('btnNext').textContent = m.pass === 'A' ? `下一步：按右图重新放好，拍第 2 遍（B）` : '下一步：换下一个物体';
+  const nr = nextRedo(m.object, m.pass);
+  $('btnNext').textContent = m.redo ? (nr ? `下一步：${nr.obj} ${passName(nr.obj, nr.pass)}（先按图摆好）` : '下一步：重拍任务都拍完了，回到列表')
+    : (m.pass === 'A' ? `下一步：按右图重新放好，拍第 2 遍（B）` : '下一步：换下一个物体');
 }
 function share(files) {
   if (navigator.canShare && navigator.canShare({ files })) {
@@ -473,11 +524,15 @@ $('btnShareBoth').onclick = () => share([lastFiles.video, lastFiles.pose]);
 $('btnShareVid').onclick = () => share([lastFiles.video]);
 $('btnRetake').onclick = () => { if (!confirm('确定不保存，直接重拍？')) return; lastFiles = null; chunks = []; backToCap(); };
 $('btnNext').onclick = () => {
-  const d = loadDone()[cur.obj] || {};
-  if (!d[cur.pass] && !confirm('这一遍还没保存（或保存没有成功），确定继续？视频会被清掉。')) return;
-  const wasA = lastFiles && lastFiles.meta.pass === 'A';
+  if (!passDone(cur.obj, cur.pass) && !confirm('这一遍还没保存（或保存没有成功），确定继续？视频会被清掉。')) return;
+  const wasA = lastFiles && lastFiles.meta.pass === 'A', wasRedo = lastFiles && lastFiles.meta.redo;
   lastFiles = null; chunks = [];
-  if (wasA) { cur.pass = 'B'; backToCap(); }
+  if (wasRedo) {   // 重拍：回到列表，选中下一个任务（换物体或换摆法都要先摆好再开拍）
+    const nr = nextRedo(cur.obj, cur.pass);
+    if (nr) { cur.obj = nr.obj; cur.pass = nr.pass; }
+    $('save').classList.add('hidden'); $('cap').classList.add('hidden'); $('setup').classList.remove('hidden'); renderSetup();
+  }
+  else if (wasA) { cur.pass = 'B'; backToCap(); }
   else {
     const i = OBJECTS.findIndex(o => o.label === cur.obj);
     const nxt = OBJECTS.slice(i + 1).find(o => !o.reserve);
@@ -488,11 +543,12 @@ $('btnNext').onclick = () => {
 function backToCap() {
   const o = objOf(cur.obj);
   $('save').classList.add('hidden'); $('cap').classList.remove('hidden');
-  $('hudObj').textContent = `${o.label} · 第${cur.pass === 'A' ? 1 : 2}遍(${cur.pass})`;
+  $('hudObj').textContent = `${o.label} · ${passName(o.label, cur.pass)}`;
   $('hudRec').textContent = ''; $('hudSize').textContent = '';
   resetCoverage(); requestAnimationFrame(loop);
 }
 
+{ const r = firstRedo(); if (r) { cur.obj = r.obj; cur.pass = r.pass; } }
 renderSetup();
 if (!window.isSecureContext) $('env').textContent = '提示：需要用 https 地址打开，否则不能用相机。';
 </script>
